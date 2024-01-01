@@ -1640,6 +1640,7 @@ function baseCreateRenderer(
       if (patchFlag & PatchFlags.KEYED_FRAGMENT) {
         // this could be either fully-keyed or mixed (some keyed some not)
         // presence of patchFlag means children are guaranteed to be arrays
+        // 有key的diff算法
         patchKeyedChildren(
           c1 as VNode[],
           c2 as VNodeArrayChildren,
@@ -1654,7 +1655,7 @@ function baseCreateRenderer(
         return
       } else if (patchFlag & PatchFlags.UNKEYED_FRAGMENT) {
         // unkeyed
-        // 没有key
+        // 没有key的diff算法
         patchUnkeyedChildren(
           c1 as VNode[],
           c2 as VNodeArrayChildren,
@@ -1722,9 +1723,10 @@ function baseCreateRenderer(
     }
   }
 
+  // 没有key的diff算法
   const patchUnkeyedChildren = (
-    c1: VNode[],
-    c2: VNodeArrayChildren,
+    c1: VNode[],   // 旧的
+    c2: VNodeArrayChildren,  // 新的
     container: RendererElement,
     anchor: RendererNode | null,
     parentComponent: ComponentInternalInstance | null,
@@ -1739,6 +1741,7 @@ function baseCreateRenderer(
     const newLength = c2.length
     const commonLength = Math.min(oldLength, newLength)
     let i
+    // 1. 循环更新
     for (i = 0; i < commonLength; i++) {
       const nextChild = (c2[i] = optimized
         ? cloneIfMounted(c2[i] as VNode)
@@ -1756,6 +1759,7 @@ function baseCreateRenderer(
       )
     }
     if (oldLength > newLength) {
+      // 2. 新节点没有老节点多，删除老节点
       // remove old
       unmountChildren(
         c1,
@@ -1766,6 +1770,7 @@ function baseCreateRenderer(
         commonLength,
       )
     } else {
+      // 2. 新节点多，添加新节点
       // mount new
       mountChildren(
         c2,
@@ -1782,6 +1787,7 @@ function baseCreateRenderer(
   }
 
   // can be all-keyed or mixed
+  // 有key的diff算法
   const patchKeyedChildren = (
     c1: VNode[],
     c2: VNodeArrayChildren,
@@ -1798,6 +1804,7 @@ function baseCreateRenderer(
     let e1 = c1.length - 1 // prev ending index
     let e2 = l2 - 1 // next ending index
 
+    // 1. 前序算法, 只对比前面的
     // 1. sync from start
     // (a b) c
     // (a b) d e
@@ -1806,6 +1813,7 @@ function baseCreateRenderer(
       const n2 = (c2[i] = optimized
         ? cloneIfMounted(c2[i] as VNode)
         : normalizeVNode(c2[i]))
+        // 比较两个节点是否相同
       if (isSameVNodeType(n1, n2)) {
         patch(
           n1,
@@ -1824,6 +1832,7 @@ function baseCreateRenderer(
       i++
     }
 
+    // 2. 尾序对比, 只对比后面的
     // 2. sync from end
     // a (b c)
     // d e (b c)
@@ -1851,6 +1860,8 @@ function baseCreateRenderer(
       e2--
     }
 
+    // tips: 这里和Vue2的双端diff算法不同, Vue2是头和头对比, 尾和尾对比, 头和尾对比, 尾和头对比!!
+
     // 3. common sequence + mount
     // (a b)
     // (a b) c
@@ -1858,13 +1869,14 @@ function baseCreateRenderer(
     // (a b)
     // c (a b)
     // i = 0, e1 = -1, e2 = 0
+    // 3. 前面对比完, 后面对比完, 发现有多的进行新增
     if (i > e1) {
       if (i <= e2) {
         const nextPos = e2 + 1
         const anchor = nextPos < l2 ? (c2[nextPos] as VNode).el : parentAnchor
         while (i <= e2) {
           patch(
-            null,
+            null,  // 不传递旧节点, 说明是新增
             (c2[i] = optimized
               ? cloneIfMounted(c2[i] as VNode)
               : normalizeVNode(c2[i])),
@@ -1888,6 +1900,7 @@ function baseCreateRenderer(
     // a (b c)
     // (b c)
     // i = 0, e1 = 0, e2 = -1
+    // 4. 前面对比完, 后面对比完, 发现有少的进行卸载
     else if (i > e2) {
       while (i <= e1) {
         unmount(c1[i], parentComponent, parentSuspense, true)
@@ -1899,10 +1912,18 @@ function baseCreateRenderer(
     // [i ... e1 + 1]: a b [c d e] f g
     // [i ... e2 + 1]: a b [e d c h] f g
     // i = 2, e1 = 4, e2 = 5
+    // 5. 最难的第五部: 乱序对比
     else {
       const s1 = i // prev starting index
       const s2 = i // next starting index
 
+      // 构建新节点的映射关系
+      // key     1 2 3 4 5 (理解为item.id)
+      // 对应索引 0 1 2 3 4
+      // 排序
+      // key     5 4 3 2 1
+      // 对应索引 0 1 2 3 4
+      // 构建map 5=>0, 4=>1, 3=>2, 2=>3, 1=>4
       // 5.1 build key:index map for newChildren
       const keyToNewIndexMap: Map<string | number | symbol, number> = new Map()
       for (i = s2; i <= e2; i++) {
@@ -1934,6 +1955,8 @@ function baseCreateRenderer(
       // and oldIndex = 0 is a special value indicating the new node has
       // no corresponding old node.
       // used for determining longest stable subsequence
+      // 记录新节点在旧节点中的位置数组
+      // [5, 4, 3, 2, 1]
       const newIndexToOldIndexMap = new Array(toBePatched)
       for (i = 0; i < toBePatched; i++) newIndexToOldIndexMap[i] = 0
 
@@ -1941,6 +1964,7 @@ function baseCreateRenderer(
         const prevChild = c1[i]
         if (patched >= toBePatched) {
           // all new children have been patched so this can only be a removal
+          // 如果有多余的旧节点就给他删除
           unmount(prevChild, parentComponent, parentSuspense, true)
           continue
         }
@@ -1959,6 +1983,7 @@ function baseCreateRenderer(
             }
           }
         }
+        // 如果新节点不包含旧节点也给他删除
         if (newIndex === undefined) {
           unmount(prevChild, parentComponent, parentSuspense, true)
         } else {
@@ -1966,6 +1991,7 @@ function baseCreateRenderer(
           if (newIndex >= maxNewIndexSoFar) {
             maxNewIndexSoFar = newIndex
           } else {
+            // 节点出现交叉 说明是要移动要去求最长递增子序列
             moved = true
           }
           patch(
@@ -1985,6 +2011,7 @@ function baseCreateRenderer(
 
       // 5.3 move and mount
       // generate longest stable subsequence only when nodes have moved
+      // 求最长递增子序列升序
       const increasingNewIndexSequence = moved
         ? getSequence(newIndexToOldIndexMap)
         : EMPTY_ARR
@@ -2012,9 +2039,11 @@ function baseCreateRenderer(
           // move if:
           // There is no stable subsequence (e.g. a reverse)
           // OR current node is not among the stable sequence
+          // 如果当前遍历的这个节点不在子序列说明要进行移动
           if (j < 0 || i !== increasingNewIndexSequence[j]) {
             move(nextChild, container, anchor, MoveType.REORDER)
           } else {
+            // 如果节点在子序列则直接跳过
             j--
           }
         }
@@ -2471,6 +2500,7 @@ export function traverseStaticChildren(n1: VNode, n2: VNode, shallow = false) {
 }
 
 // https://en.wikipedia.org/wiki/Longest_increasing_subsequence
+// 贪心 + 二分: 求最长递增子序列
 function getSequence(arr: number[]): number[] {
   const p = arr.slice()
   const result = [0]
