@@ -1654,6 +1654,7 @@ function baseCreateRenderer(
         return
       } else if (patchFlag & PatchFlags.UNKEYED_FRAGMENT) {
         // unkeyed
+        // 没有key
         patchUnkeyedChildren(
           c1 as VNode[],
           c2 as VNodeArrayChildren,
